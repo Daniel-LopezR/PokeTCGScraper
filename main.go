@@ -104,7 +104,14 @@ func (s *Seller) LoadSellerCardRow(loadSeller bool, sCard *Card, row *rod.Elemen
 	}
 
 	sellerProductPrice := sellerOffer.MustElement(".price-container").MustText()
-	price, err := strconv.ParseFloat(strings.Split(sellerProductPrice, " ")[0], 32)
+	price, err := strconv.ParseFloat(
+		strings.Replace(
+			strings.Split(sellerProductPrice, " ")[0],
+			",", `.`, 1,
+		),
+		32,
+	)
+
 	if err != nil {
 		sCard.Price = 0
 	} else {
