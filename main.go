@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -30,17 +32,25 @@ type Seller struct {
 	CardsAvaialble []Card
 }
 
+// Create a page if needed
+func GetCreatePage(browser *rod.Browser) func() *rod.Page {
+	create := func() *rod.Page {
+		// We use MustIncognito to isolate pages with each other
+		return browser.MustIncognito().MustPage()
+	}
+	return create
+}
+
 func (s *Seller) Round(wantedList *[]string) {
+	b := rod.New().MustConnect()
 	queryURL := "/Offers/Singles?condition=2&name="
 
 	for _, chase := range *wantedList {
 		encodedChase := url.QueryEscape(chase)
 		fullURL := s.Url + queryURL + encodedChase
 
-		browser := rod.New().MustConnect()
-		defer browser.MustClose()
-
-		sellerCardsPage := browser.MustPage(fullURL).MustWaitStable()
+		sellerCardsPage := b.MustIncognito().MustPage(fullURL).MustWaitStable()
+		defer sellerCardsPage.MustClose()
 
 		cardsTable := sellerCardsPage.MustElement("div.table-body")
 
@@ -53,7 +63,6 @@ func (s *Seller) Round(wantedList *[]string) {
 				}, avCard)
 			}
 		}
-
 	}
 }
 
@@ -104,11 +113,13 @@ func (s *Seller) LoadSellerCardRow(loadSeller bool, sCard *Card, row *rod.Elemen
 	}
 
 	sellerProductPrice := sellerOffer.MustElement(".price-container").MustText()
+	unparsedPrice := strings.Split(strings.Split(sellerProductPrice, " ")[0], ",")
+	unparsedPrice[0] = strings.ReplaceAll(
+		unparsedPrice[0],
+		".", "",
+	)
 	price, err := strconv.ParseFloat(
-		strings.Replace(
-			strings.Split(sellerProductPrice, " ")[0],
-			",", `.`, 1,
-		),
+		fmt.Sprintf("%s.%s", unparsedPrice[0], unparsedPrice[1]),
 		32,
 	)
 
@@ -130,12 +141,13 @@ func main() {
 	// TODO: import wantedList from e.g. csv, maybe cardmarket api(don't think i will do this tbh)
 	wantedList := []string{"Zeraora V (s12a 040)", "Pikachu (s12a 205)", "Radiant Charizard (s12a 15)", "Radiant Greninja (s12a 33)", "Arceus V (s12a 126)", "Irida (s12a 236)", "Water Energy (s12a 253)"}
 
-	browser := rod.New().
-		MustConnect()
-
+	log.Println("Creating browser...")
+	browser := rod.New().MustConnect()
 	defer browser.MustClose()
 
-	page := browser.MustPage(url).MustWaitStable()
+	log.Println("Loading page...")
+	page := browser.MustIncognito().MustPage(url).MustWaitStable()
+	defer page.MustClose()
 
 	title := page.MustElement("h1").MustText()
 	subject := strings.SplitAfter(title, ")")
@@ -164,6 +176,21 @@ func main() {
 
 	log.Println("Looking sellers...")
 	sellerElements := page.MustElements("div.row.g-0.article-row")
+
+	// pool := rod.NewPagePool(10)
+	// // Run jobs concurrently
+	// wg := sync.WaitGroup{}
+	// wg.Add(1)
+	// go func() {
+
+	// 	defer wg.Done()
+	// 	page := pool.MustGet(GetCreatePage(browser))
+	// 	defer pool.Put(page)
+	// }()
+	// wg.Wait()
+	// // cleanup pool
+	// pool.Cleanup(func(p *rod.Page) { p.MustClose() })
+
 	for _, sEl := range sellerElements {
 		seller := &Seller{}
 
@@ -180,5 +207,12 @@ func main() {
 		sellers = append(sellers, seller)
 		seller.Round(&wantedList)
 	}
-	log.Printf("Finished looking for potential sellers: \n%v\n", sellers)
+
+	sort.Slice(sellers, func(i, j int) bool {
+		return len(sellers[i].CardsAvaialble) > len(sellers[j].CardsAvaialble)
+	})
+	log.Println("Finished looking for potential sellers:")
+	for idx, s := range sellers {
+		log.Printf("--- %d ---\n%+v\n", idx, s)
+	}
 }
