@@ -41,15 +41,16 @@ func GetCreatePage(browser *rod.Browser) func() *rod.Page {
 	return create
 }
 
-func (s *Seller) Round(wantedList *[]string) {
-	b := rod.New().MustConnect()
-	queryURL := "/Offers/Singles?condition=2&name="
-
+func (s *Seller) Round(b *rod.Browser, wantedList *[]string) {
+	//b := rod.New().MustConnect()
+	queryURL := "/Offers/Singles?idExpansion=5198&idLanguage=7&condition=2"
+	// a[data-direction="next"]
 	for _, chase := range *wantedList {
 		encodedChase := url.QueryEscape(chase)
 		fullURL := s.Url + queryURL + encodedChase
 
-		sellerCardsPage := b.MustIncognito().MustPage(fullURL).MustWaitStable()
+		log.Printf("Loading page for chase card (%s)", chase)
+		sellerCardsPage := b.MustIncognito().MustPage(fullURL).MustWaitDOMStable()
 		defer sellerCardsPage.MustClose()
 
 		cardsTable := sellerCardsPage.MustElement("div.table-body")
@@ -88,16 +89,26 @@ func (s *Seller) LoadSellerCardRow(loadSeller bool, sCard *Card, row *rod.Elemen
 
 		log.Printf("Added new Seller%+v\n", s)
 	} else {
-		// Load Card Url
-		sCard.Url = CARDMARKET_URL + *row.MustElement(".col-seller").MustElement("a").MustAttribute("href")
-		log.Println("Updated Card Url!")
+		cardInfo := row.MustElement(".col-seller")
+		cardLinkElement := cardInfo.MustElement("a[href]")
+		cardName := cardLinkElement.MustText()
+		if cardName == sCard.Name {
+			// Load Card Url
+			sCard.Url = CARDMARKET_URL + *row.MustElement(".col-seller").MustElement("a").MustAttribute("href")
+			log.Println("Updated Card Url!")
+		} else {
+			return
+		}
 	}
 
 	// Seller product
 	sellerProductInfo := row.MustElement(".col-product")
 
 	sCard.Condition = sellerProductInfo.MustElement("a.article-condition").MustText()
-	sCard.Language = *sellerProductInfo.MustElement("span.icon").MustAttribute("aria-label")
+	languageP := sellerProductInfo.MustWaitStable().MustElement("span.icon").MustAttribute("aria-label")
+	if languageP != nil {
+		sCard.Language = *languageP
+	}
 	if ok, descriptionElement, _ := sellerProductInfo.Has("span.text-muted"); ok {
 		sCard.Description = descriptionElement.MustText()
 	}
@@ -128,7 +139,7 @@ func (s *Seller) LoadSellerCardRow(loadSeller bool, sCard *Card, row *rod.Elemen
 	} else {
 		sCard.Price = float32(price)
 	}
-	log.Printf("Added new Card(%d x %s(%s) - %0.2f €) to Seller%s\n", sCard.Quantity, sCard.Name, sCard.Condition, sCard.Price, s.Name)
+	log.Printf("Added new Card(%d x %s(%s) - %0.2f €) to Seller %s\n", sCard.Quantity, sCard.Name, sCard.Condition, sCard.Price, s.Name)
 
 	s.CardsAvaialble = append(s.CardsAvaialble, *sCard)
 }
@@ -137,16 +148,27 @@ func main() {
 	sellers := []*Seller{}
 	showMore := true
 	// TODO: Loop wanted list instead of hardcoding url
-	url := "https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Elesas-Sparkle-V2-s12a246"
+	url := "https://www.cardmarket.com/es/Pokemon/Products/Singles/VSTAR-Universe/Cynthias-Ambition-V2-s12a239?language=7&minCondition=2"
 	// TODO: import wantedList from e.g. csv, maybe cardmarket api(don't think i will do this tbh)
-	wantedList := []string{"Zeraora V (s12a 040)", "Pikachu (s12a 205)", "Radiant Charizard (s12a 15)", "Radiant Greninja (s12a 33)", "Arceus V (s12a 126)", "Irida (s12a 236)", "Water Energy (s12a 253)"}
+	wantedList := []string{
+		"Swablu (s12a 202)",
+		"Drapion V (s12a 227)",
+		"Raihan (s12a 237)",
+		"Grant (s12a 238)",
+		"Cheren's Care (s12a 241)",
+		"Roxanne (s12a 242)",
+		"Melony (s12a 244)",
+		"Volo (s12a 245)",
+		"Friends in Hisui (s12a 249)",
+		"Boss's Orders (s12a 250)",
+	}
 
 	log.Println("Creating browser...")
 	browser := rod.New().MustConnect()
 	defer browser.MustClose()
 
 	log.Println("Loading page...")
-	page := browser.MustIncognito().MustPage(url).MustWaitStable()
+	page := browser.MustIncognito().MustPage(url).MustWaitDOMStable()
 	defer page.MustClose()
 
 	title := page.MustElement("h1").MustText()
@@ -205,7 +227,7 @@ func main() {
 		)
 
 		sellers = append(sellers, seller)
-		seller.Round(&wantedList)
+		seller.Round(browser, &wantedList)
 	}
 
 	sort.Slice(sellers, func(i, j int) bool {
