@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-rod/rod"
 )
@@ -179,20 +180,26 @@ func main() {
 	log.Printf("Looking Set -> %s", setName)
 
 	for showMore {
-		showMoreButton := page.MustElement("#loadMoreButton")
-		attrs := showMoreButton.MustDescribe().Attributes
-		log.Printf("Attributes %v", attrs)
-		disabled, err := showMoreButton.Attribute("disabled")
+		log.Println("Looking for more sellers")
+		showMoreButton, err := page.Timeout(10 * time.Second).Element("#loadMoreButton")
 		if err != nil {
-			panic(err)
-		}
-		if disabled == nil {
-			log.Println("Showing more sellers...")
-			showMoreButton.MustWaitStable().MustClick().MustWaitInvisible()
-		} else {
-			log.Printf("Show More Results - disabled attr(%s)", *disabled)
-			log.Println("No more sellers to show!")
+			log.Printf("Error Loading more sellers: %s", err.Error())
 			showMore = false
+		} else {
+			attrs := showMoreButton.MustDescribe().Attributes
+			log.Printf("Attributes %v", attrs)
+			disabled, err := showMoreButton.Attribute("disabled")
+			if err != nil {
+				panic(err)
+			}
+			if disabled == nil {
+				log.Println("Showing more sellers...")
+				showMoreButton.MustWaitStable().MustClick().MustWaitInvisible()
+			} else {
+				log.Printf("Show More Results - disabled attr(%s)", *disabled)
+				log.Println("No more sellers to show!")
+				showMore = false
+			}
 		}
 	}
 
