@@ -148,7 +148,7 @@ func main() {
 	sellers := []*Seller{}
 	showMore := true
 	// TODO: Loop wanted list instead of hardcoding url
-	url := "https://www.cardmarket.com/es/Pokemon/Products/Singles/VSTAR-Universe/Cynthias-Ambition-V2-s12a239?language=7&minCondition=2"
+	url := "https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Cynthias-Ambition-V2-s12a239?language=7&minCondition=2"
 	// TODO: import wantedList from e.g. csv, maybe cardmarket api(don't think i will do this tbh)
 	wantedList := []string{
 		"Swablu (s12a 202)",
@@ -235,6 +235,13 @@ func main() {
 	})
 	log.Println("Finished looking for potential sellers:")
 	for idx, s := range sellers {
-		log.Printf("--- %d ---\n%+v\n", idx, s)
+		log.Printf("--- %s %d ---\n", s.Name, idx+1)
+		log.Printf("URL:\t%s\n", s.Url)
+		log.Printf("Cards for sale (%d/%d):\n", len(s.CardsAvaialble), len(wantedList))
+		var total float32 = 0
+		for _, ca := range s.CardsAvaialble {
+			total += ca.Price
+			log.Printf("\tCard(%s(%s) x %d - %0.2f €)\n", ca.Name, ca.Condition, ca.Quantity, ca.Price)
+		}
 	}
 }
