@@ -1,4 +1,4 @@
-package main
+package scraper
 
 import (
 	"fmt"
@@ -145,27 +145,20 @@ func (s *Seller) LoadSellerCardRow(loadSeller bool, sCard *Card, row *rod.Elemen
 	s.CardsAvaialble = append(s.CardsAvaialble, *sCard)
 }
 
-func main() {
+func scrap(wantedList []string) {
 	sellers := []*Seller{}
 	showMore := true
 	// TODO: Loop wanted list instead of hardcoding url
 	url := "https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Cynthias-Ambition-V2-s12a239?language=7&minCondition=2"
 	// TODO: import wantedList from e.g. csv, maybe cardmarket api(don't think i will do this tbh)
-	wantedList := []string{
-		"Swablu (s12a 202)",
-		"Drapion V (s12a 227)",
-		"Raihan (s12a 237)",
-		"Grant (s12a 238)",
-		"Cheren's Care (s12a 241)",
-		"Roxanne (s12a 242)",
-		"Melony (s12a 244)",
-		"Volo (s12a 245)",
-		"Friends in Hisui (s12a 249)",
-		"Boss's Orders (s12a 250)",
-	}
 
 	log.Println("Creating browser...")
-	browser := rod.New().MustConnect()
+	//u := launcher.New().
+	//	Set("ozone-platform", "wayland").
+	//	Set("headless").MustLaunch()
+	u := "ws://127.0.0.1:9222/devtools/browser/da8466a0-e51f-4131-9629-d794b6e7db07"
+	//u := launcher.New().Set("headless").MustLaunch()
+	browser := rod.New().ControlURL(u).MustConnect()
 	defer browser.MustClose()
 
 	log.Println("Loading page...")
