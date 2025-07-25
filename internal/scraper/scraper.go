@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"poke-tcg-scraper/internal"
 	"sort"
 	"strconv"
 	"strings"
@@ -11,6 +12,36 @@ import (
 
 	"github.com/go-rod/rod"
 )
+
+type Scraper struct {
+	observers []internal.Observer
+	WantedList []string
+}
+
+func (s *Scraper) Register (o internal.Observer) {
+	s.observers = append(s.observers, o)
+}
+
+func (s *Scraper) Deregister (o internal.Observer) {
+	//s.observers = removeFromSlice(s.observers, o)
+}
+
+func (s *Scraper) NotifyAll (message internal.Message) {
+	for _, observer := range s.observers {
+		observer.Update(message)
+	}
+}
+
+func removeFromSlice(observers []internal.Observer, observerToRemove internal.Observer) []internal.Observer {
+	observersLength := len(observers)
+	for i, observer := range observers {
+		if observerToRemove.GetID() == observer.GetID() {
+			observers[observersLength-1], observers[i] = observers[i], observers[observersLength-1]
+			return observers[:observersLength-1]
+		}
+	}
+	return observers
+}
 
 const CARDMARKET_URL = "https://www.cardmarket.com"
 

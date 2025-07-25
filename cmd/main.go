@@ -1,6 +1,8 @@
 package main
 
 import (
+	s "poke-tcg-scraper/internal/scraper"
+
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
@@ -26,6 +28,16 @@ func main() {
 	
 	BASE_X := 100
 	BASE_Y := 0
+	scraper := &s.Scraper{
+		WantedList: wantedList,
+	}
+	scraperScene := &s.ScraperScene{
+		WantedList: wantedList,
+	}
+	
+	// TODO: Modify scraper to notify the observer for every card change
+	// TODO: Change how scraper operates, it should go to every card and look every seller not from a card look at every seller for every card
+	scraper.Register(scraperScene)
 	
 	for !rl.WindowShouldClose() {
 		rl.BeginDrawing()
