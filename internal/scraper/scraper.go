@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/url"
 	"poke-tcg-scraper/internal"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -15,18 +14,20 @@ import (
 
 type Scraper struct {
 	observers []internal.Observer
+	// This should be in the config/state
 	WantedList []string
+	Sellers    []*Seller
 }
 
-func (s *Scraper) Register (o internal.Observer) {
+func (s *Scraper) Register(o internal.Observer) {
 	s.observers = append(s.observers, o)
 }
 
-func (s *Scraper) Deregister (o internal.Observer) {
+func (s *Scraper) Deregister(o internal.Observer) {
 	//s.observers = removeFromSlice(s.observers, o)
 }
 
-func (s *Scraper) NotifyAll (message internal.Message) {
+func (s *Scraper) NotifyAll(message internal.Message) {
 	for _, observer := range s.observers {
 		observer.Update(message)
 	}
@@ -99,39 +100,48 @@ func (s *Seller) Round(b *rod.Browser, wantedList *[]string) {
 	}
 }
 
-func (s *Seller) LoadSellerCardRow(loadSeller bool, sCard *Card, row *rod.Element) {
-	if loadSeller {
-		// Seller Info
-		sellerInfo := row.MustElement(".col-seller")
+func (s *Scraper) GetOrCreateSeller(row *rod.Element) *Seller {
+	sellerInfo := row.MustElement(".col-seller")
 
-		sellerLinkElement := sellerInfo.MustElement("a[href]")
-		s.Name = sellerLinkElement.MustText()
-		s.Url = CARDMARKET_URL + *sellerLinkElement.MustAttribute("href")
-
-		sellerRegionAttr := *sellerInfo.MustElement("span.icon").MustAttribute("aria-label")
-		s.Region = strings.TrimSpace(strings.Split(sellerRegionAttr, ":")[1])
-
-		if sellerInfo.MustHas("span.fonticon-users-powerseller") {
-			s.Category = "Powerseller"
-		} else if sellerInfo.MustHas("span.fonticon-users-professional") {
-			s.Category = "Professional"
-		} else {
-			s.Category = "Hobby"
-		}
-
-		log.Printf("Added new Seller%+v\n", s)
-	} else {
-		cardInfo := row.MustElement(".col-seller")
-		cardLinkElement := cardInfo.MustElement("a[href]")
-		cardName := cardLinkElement.MustText()
-		if cardName == sCard.Name {
-			// Load Card Url
-			sCard.Url = CARDMARKET_URL + *row.MustElement(".col-seller").MustElement("a").MustAttribute("href")
-			log.Println("Updated Card Url!")
-		} else {
-			return
+	sellerLinkElement := sellerInfo.MustElement("a[href]")
+	sellerName := sellerLinkElement.MustText()
+	for _, sel := range s.Sellers {
+		if sel.Name == sellerName {
+			return sel
 		}
 	}
+	sel := &Seller{
+		Name: sellerName,
+	}
+	sel.Url = CARDMARKET_URL + *sellerLinkElement.MustAttribute("href")
+
+	sellerRegionAttr := *sellerInfo.MustElement("span.icon").MustAttribute("aria-label")
+	sel.Region = strings.TrimSpace(strings.Split(sellerRegionAttr, ":")[1])
+
+	if sellerInfo.MustHas("span.fonticon-users-powerseller") {
+		sel.Category = "Powerseller"
+	} else if sellerInfo.MustHas("span.fonticon-users-professional") {
+		sel.Category = "Professional"
+	} else {
+		sel.Category = "Hobby"
+	}
+
+	log.Printf("Added new Seller%+v\n", s)
+	return sel
+}
+
+func (s *Seller) LoadSellerCardRow(loadSeller bool, sCard *Card, row *rod.Element) {
+
+	// cardInfo := row.MustElement(".col-seller")
+	// cardLinkElement := cardInfo.MustElement("a[href]")
+	// cardName := cardLinkElement.MustText()
+	// if cardName == sCard.Name {
+	// 	// Load Card Url
+	// 	sCard.Url = CARDMARKET_URL + *row.MustElement(".col-seller").MustElement("a").MustAttribute("href")
+	// 	log.Println("Updated Card Url!")
+	// } else {
+	// 	return
+	// }	
 
 	// Seller product
 	sellerProductInfo := row.MustElement(".col-product")
@@ -176,59 +186,76 @@ func (s *Seller) LoadSellerCardRow(loadSeller bool, sCard *Card, row *rod.Elemen
 	s.CardsAvaialble = append(s.CardsAvaialble, *sCard)
 }
 
-func scrap(wantedList []string) {
-	sellers := []*Seller{}
-	showMore := true
-	// TODO: Loop wanted list instead of hardcoding url
-	url := "https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Cynthias-Ambition-V2-s12a239?language=7&minCondition=2"
-	// TODO: import wantedList from e.g. csv, maybe cardmarket api(don't think i will do this tbh)
-
+func (s *Scraper) Scrap() {
+	now := time.Now()
 	log.Println("Creating browser...")
-	//u := launcher.New().
-	//	Set("ozone-platform", "wayland").
-	//	Set("headless").MustLaunch()
-	u := "ws://127.0.0.1:9222/devtools/browser/da8466a0-e51f-4131-9629-d794b6e7db07"
-	//u := launcher.New().Set("headless").MustLaunch()
+	u := "ws://127.0.0.1:9222/devtools/browser/45641824-d164-4977-aa48-bd0ceb2c020a"
 	browser := rod.New().ControlURL(u).MustConnect()
 	defer browser.MustClose()
 
-	log.Println("Loading page...")
-	page := browser.MustIncognito().MustPage(url).MustWaitDOMStable()
-	defer page.MustClose()
+	for _, wURL := range s.WantedList {
+		showMore := true
+		log.Println("Loading page...")
+		page := browser.MustIncognito().MustPage(wURL).MustWaitDOMStable()
+		defer page.MustClose()
 
-	title := page.MustElement("h1").MustText()
-	subject := strings.SplitAfter(title, ")")
-	cardName := subject[0]
-	setName := strings.TrimSpace(subject[1])
-	log.Printf("Looking Card -> %s", cardName)
-	log.Printf("Looking Set -> %s", setName)
+		title := page.MustElement("h1").MustText()
+		subject := strings.SplitAfter(title, ")")
+		cardName := subject[0]
+		setName := strings.TrimSpace(subject[1])
+		log.Printf("Looking Card -> %s", cardName)
+		log.Printf("Looking Set -> %s", setName)
+		card := &Card{
+			Name:        cardName,
+			Url:         wURL,
+			Description: "",
+		}
+		
+		s.NotifyAll(internal.Message{
+			Topic: "card",
+			Data: card,
+		})
 
-	for showMore {
-		log.Println("Looking for more sellers")
-		showMoreButton, err := page.Timeout(10 * time.Second).Element("#loadMoreButton")
-		if err != nil {
-			log.Printf("Error Loading more sellers: %s", err.Error())
-			showMore = false
-		} else {
-			attrs := showMoreButton.MustDescribe().Attributes
-			log.Printf("Attributes %v", attrs)
-			disabled, err := showMoreButton.Attribute("disabled")
+		for showMore {
+			log.Println("Looking for more sellers")
+			showMoreButton, err := page.Timeout(10 * time.Second).Element("#loadMoreButton")
 			if err != nil {
-				panic(err)
-			}
-			if disabled == nil {
-				log.Println("Showing more sellers...")
-				showMoreButton.MustWaitStable().MustClick().MustWaitInvisible()
-			} else {
-				log.Printf("Show More Results - disabled attr(%s)", *disabled)
-				log.Println("No more sellers to show!")
+				log.Printf("Error Loading more sellers: %s", err.Error())
 				showMore = false
+			} else {
+				attrs := showMoreButton.MustDescribe().Attributes
+				log.Printf("Attributes %v", attrs)
+				disabled, err := showMoreButton.Attribute("disabled")
+				if err != nil {
+					panic(err)
+				}
+				if disabled == nil {
+					log.Println("Showing more sellers...")
+					showMoreButton.MustWaitStable().MustClick().MustWaitInvisible()
+				} else {
+					log.Printf("Show More Results - disabled attr(%s)", *disabled)
+					log.Println("No more sellers to show!")
+					showMore = false
+				}
 			}
 		}
-	}
+		log.Println("Looking sellers...")
+		sellerElements := page.MustElements("div.row.g-0.article-row")
 
-	log.Println("Looking sellers...")
-	sellerElements := page.MustElements("div.row.g-0.article-row")
+		for _, sEl := range sellerElements {
+			seller := &Seller{}
+
+			seller.LoadSellerCardRow(
+				true,
+				card,
+				sEl,
+			)
+
+			s.Sellers = append(s.Sellers, seller)
+			//seller.Round(browser, &wantedList)
+		}
+	}
+	log.Println("Finished after ", time.Since(now))
 
 	// pool := rod.NewPagePool(10)
 	// // Run jobs concurrently
@@ -244,35 +271,18 @@ func scrap(wantedList []string) {
 	// // cleanup pool
 	// pool.Cleanup(func(p *rod.Page) { p.MustClose() })
 
-	for _, sEl := range sellerElements {
-		seller := &Seller{}
-
-		seller.LoadSellerCardRow(
-			true,
-			&Card{
-				Name:        cardName,
-				Url:         url,
-				Description: "",
-			},
-			sEl,
-		)
-
-		sellers = append(sellers, seller)
-		seller.Round(browser, &wantedList)
-	}
-
-	sort.Slice(sellers, func(i, j int) bool {
-		return len(sellers[i].CardsAvaialble) > len(sellers[j].CardsAvaialble)
-	})
-	log.Println("Finished looking for potential sellers:")
-	for idx, s := range sellers {
-		log.Printf("--- %s %d ---\n", s.Name, idx+1)
-		log.Printf("URL:\t%s\n", s.Url)
-		log.Printf("Cards for sale (%d/%d):\n", len(s.CardsAvaialble), len(wantedList))
-		var total float32 = 0
-		for _, ca := range s.CardsAvaialble {
-			total += ca.Price
-			log.Printf("\tCard(%s(%s) x %d - %0.2f €)\n", ca.Name, ca.Condition, ca.Quantity, ca.Price)
-		}
-	}
+	// sort.Slice(sellers, func(i, j int) bool {
+	// 	return len(sellers[i].CardsAvaialble) > len(sellers[j].CardsAvaialble)
+	// })
+	// log.Println("Finished looking for potential sellers:")
+	// for idx, s := range sellers {
+	// 	log.Printf("--- %s %d ---\n", s.Name, idx+1)
+	// 	log.Printf("URL:\t%s\n", s.Url)
+	// 	log.Printf("Cards for sale (%d/%d):\n", len(s.CardsAvaialble), len(wantedList))
+	// 	var total float32 = 0
+	// 	for _, ca := range s.CardsAvaialble {
+	// 		total += ca.Price
+	// 		log.Printf("\tCard(%s(%s) x %d - %0.2f €)\n", ca.Name, ca.Condition, ca.Quantity, ca.Price)
+	// 	}
+	// }
 }

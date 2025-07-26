@@ -7,50 +7,44 @@ import (
 )
 
 func main() {
-	wantedListText := "Wanted List"
 	wantedList := []string{
-		"Swablu (s12a 202)",
-		"Drapion V (s12a 227)",
-		"Raihan (s12a 237)",
-		"Grant (s12a 238)",
-		"Cheren's Care (s12a 241)",
-		"Roxanne (s12a 242)",
-		"Melony (s12a 244)",
-		"Volo (s12a 245)",
-		"Friends in Hisui (s12a 249)",
-		"Boss's Orders (s12a 250)",
-		}
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Cynthias-Ambition-V2-s12a239?language=7&minCondition=2",
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Swablu-V2-s12a202?language=7&minCondition=2",
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Drapion-V-V2-s12a227?language=7&minCondition=2",
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Raihan-V2-s12a237?language=7&minCondition=2",
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Grant-V2-s12a238?language=7&minCondition=2",
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Cherens-Care-V2-s12a241?language=7&minCondition=2",
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Roxanne-V2-s12a242?language=7&minCondition=2",
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Melony-V2-s12a244?language=7&minCondition=2",
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Volo-V2-s12a245?language=7&minCondition=2",
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Friends-in-Hisui-V2-s12a249?language=7&minCondition=2",
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Bosss-Orders-Cyrus-V2-s12a250?language=7&minCondition=2",
+	}
 	rl.InitWindow(1000, 600, "PokeTCGScraper")
 	defer rl.CloseWindow()
 	//rl.SetConfigFlags(rl.FlagWindowUndecorated)
 	//rl.ToggleFullscreen()
 	rl.SetTargetFPS(60)
-	
-	BASE_X := 100
-	BASE_Y := 0
+
 	scraper := &s.Scraper{
 		WantedList: wantedList,
 	}
 	scraperScene := &s.ScraperScene{
 		WantedList: wantedList,
+		CurrentCard: &s.Card{
+			Name: "None",
+		},
 	}
-	
+
 	// TODO: Modify scraper to notify the observer for every card change
 	// TODO: Change how scraper operates, it should go to every card and look every seller not from a card look at every seller for every card
 	scraper.Register(scraperScene)
-	
+	go scraper.Scrap()
 	for !rl.WindowShouldClose() {
 		rl.BeginDrawing()
 
 		rl.ClearBackground(rl.DarkGray)
-		//rl.DrawText(wantedListText, int32(rl.GetScreenWidth()/2)-rl.MeasureText(roundText, 20)/2-rl.MeasureText(player1PointsText, 20)-20, 10, 20, rl.RayWhite)
-
-		rl.DrawText(wantedListText, int32(BASE_X), int32(BASE_Y), 20, rl.Gold)
-		for i, wc := range wantedList {
-			wcX := BASE_X
-			wcY := BASE_Y + ((i+1) * 40)
-			rl.DrawText(wc, int32(wcX), int32(wcY), 20, rl.RayWhite)
-		}
+		scraperScene.Draw()
 		rl.EndDrawing()
 	}
 }
