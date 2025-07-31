@@ -3,16 +3,18 @@ package scraper
 import (
 	"fmt"
 	"log"
-	"net/url"
 	"poke-tcg-scraper/internal"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/launcher"
 )
 
 type Scraper struct {
+	Launcher   *launcher.Launcher
+	Browser    *rod.Browser
 	observers []internal.Observer
 	// This should be in the config/state
 	WantedList []string
@@ -74,32 +76,6 @@ func GetCreatePage(browser *rod.Browser) func() *rod.Page {
 	return create
 }
 
-func (s *Seller) Round(b *rod.Browser, wantedList *[]string) {
-	//b := rod.New().MustConnect()
-	queryURL := "/Offers/Singles?idExpansion=5198&idLanguage=7&condition=2"
-	// a[data-direction="next"]
-	for _, chase := range *wantedList {
-		encodedChase := url.QueryEscape(chase)
-		fullURL := s.Url + queryURL + encodedChase
-
-		log.Printf("Loading page for chase card (%s)", chase)
-		sellerCardsPage := b.MustIncognito().MustPage(fullURL).MustWaitDOMStable()
-		defer sellerCardsPage.MustClose()
-
-		cardsTable := sellerCardsPage.MustElement("div.table-body")
-
-		if cardsTable.MustHas("div.article-row") {
-			availableCards := cardsTable.MustElements("div.article-row")
-			for _, avCard := range availableCards {
-				s.LoadSellerCardRow(false, &Card{
-					Name:        chase,
-					Description: "",
-				}, avCard)
-			}
-		}
-	}
-}
-
 func (s *Scraper) GetOrCreateSeller(row *rod.Element) *Seller {
 	sellerInfo := row.MustElement(".col-seller")
 
@@ -141,7 +117,7 @@ func (s *Seller) LoadSellerCardRow(loadSeller bool, sCard *Card, row *rod.Elemen
 	// 	log.Println("Updated Card Url!")
 	// } else {
 	// 	return
-	// }	
+	// }
 
 	// Seller product
 	sellerProductInfo := row.MustElement(".col-product")
@@ -189,14 +165,17 @@ func (s *Seller) LoadSellerCardRow(loadSeller bool, sCard *Card, row *rod.Elemen
 func (s *Scraper) Scrap() {
 	now := time.Now()
 	log.Println("Creating browser...")
-	u := "ws://127.0.0.1:9222/devtools/browser/45641824-d164-4977-aa48-bd0ceb2c020a"
-	browser := rod.New().ControlURL(u).MustConnect()
-	defer browser.MustClose()
+	err := s.InitializeBrowser("brave")
+	if err != nil {
+		log.Println(err)
+		panic(err)
+	}
+	defer s.Browser.MustClose()
 
 	for _, wURL := range s.WantedList {
 		showMore := true
 		log.Println("Loading page...")
-		page := browser.MustIncognito().MustPage(wURL).MustWaitDOMStable()
+		page := s.Browser.MustPage(wURL).MustWaitDOMStable()
 		defer page.MustClose()
 
 		title := page.MustElement("h1").MustText()
@@ -210,10 +189,10 @@ func (s *Scraper) Scrap() {
 			Url:         wURL,
 			Description: "",
 		}
-		
+
 		s.NotifyAll(internal.Message{
 			Topic: "card",
-			Data: card,
+			Data:  card,
 		})
 
 		for showMore {
