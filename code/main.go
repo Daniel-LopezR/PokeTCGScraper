@@ -1,9 +1,11 @@
-package scraper
+package main
 
 import (
+	"bufio"
 	"fmt"
-	"log"
-	"poke-tcg-scraper/internal"
+	"io"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -11,43 +13,15 @@ import (
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 )
+const CARDMARKET_URL = "https://www.cardmarket.com"
 
 type Scraper struct {
 	Launcher   *launcher.Launcher
 	Browser    *rod.Browser
-	observers []internal.Observer
 	// This should be in the config/state
 	WantedList []string
 	Sellers    []*Seller
 }
-
-func (s *Scraper) Register(o internal.Observer) {
-	s.observers = append(s.observers, o)
-}
-
-func (s *Scraper) Deregister(o internal.Observer) {
-	//s.observers = removeFromSlice(s.observers, o)
-}
-
-func (s *Scraper) NotifyAll(message internal.Message) {
-	for _, observer := range s.observers {
-		observer.Update(message)
-	}
-}
-
-func removeFromSlice(observers []internal.Observer, observerToRemove internal.Observer) []internal.Observer {
-	observersLength := len(observers)
-	for i, observer := range observers {
-		if observerToRemove.GetID() == observer.GetID() {
-			observers[observersLength-1], observers[i] = observers[i], observers[observersLength-1]
-			return observers[:observersLength-1]
-		}
-	}
-	return observers
-}
-
-const CARDMARKET_URL = "https://www.cardmarket.com"
-
 type Card struct {
 	Name        string
 	Url         string
@@ -67,13 +41,19 @@ type Seller struct {
 	CardsAvaialble []Card
 }
 
-// Create a page if needed
 func GetCreatePage(browser *rod.Browser) func() *rod.Page {
 	create := func() *rod.Page {
 		// We use MustIncognito to isolate pages with each other
 		return browser.MustIncognito().MustPage()
 	}
 	return create
+}
+
+func (s *Scraper) InitializeBrowser(bType string) (error) {
+	path, _ := exec.LookPath(bType)
+	s.Launcher = launcher.New().Bin(path).Headless(true)
+	s.Browser = rod.New().ControlURL(s.Launcher.MustLaunch()).MustConnect().MustIncognito()
+	return nil
 }
 
 func (s *Scraper) GetOrCreateSeller(row *rod.Element) *Seller {
@@ -102,10 +82,9 @@ func (s *Scraper) GetOrCreateSeller(row *rod.Element) *Seller {
 		sel.Category = "Hobby"
 	}
 
-	log.Printf("Added new Seller%+v\n", s)
+	//log.Printf("Added new Seller%+v\n", s)
 	return sel
 }
-
 func (s *Seller) LoadSellerCardRow(loadSeller bool, sCard *Card, row *rod.Element) {
 
 	// cardInfo := row.MustElement(".col-seller")
@@ -157,24 +136,23 @@ func (s *Seller) LoadSellerCardRow(loadSeller bool, sCard *Card, row *rod.Elemen
 	} else {
 		sCard.Price = float32(price)
 	}
-	log.Printf("Added new Card(%d x %s(%s) - %0.2f €) to Seller %s\n", sCard.Quantity, sCard.Name, sCard.Condition, sCard.Price, s.Name)
+	//log.Printf("Added new Card(%d x %s(%s) - %0.2f €) to Seller %s\n", sCard.Quantity, sCard.Name, sCard.Condition, sCard.Price, s.Name)
 
 	s.CardsAvaialble = append(s.CardsAvaialble, *sCard)
 }
 
-func (s *Scraper) Scrap() {
-	now := time.Now()
-	log.Println("Creating browser...")
+func (s *Scraper) Scrap(writer io.Writer) {
+	//log.Println("Creating browser...")
 	err := s.InitializeBrowser("brave")
 	if err != nil {
-		log.Println(err)
+		//log.Println(err)
 		panic(err)
 	}
 	defer s.Browser.MustClose()
 
 	for _, wURL := range s.WantedList {
 		showMore := true
-		log.Println("Loading page...")
+		//log.Println("Loading page...")
 		page := s.Browser.MustPage(wURL).MustWaitDOMStable()
 		defer page.MustClose()
 
@@ -182,43 +160,40 @@ func (s *Scraper) Scrap() {
 		subject := strings.SplitAfter(title, ")")
 		cardName := subject[0]
 		setName := strings.TrimSpace(subject[1])
-		log.Printf("Looking Card -> %s", cardName)
-		log.Printf("Looking Set -> %s", setName)
+		_ = setName
+		//log.Printf("Looking Card -> %s", cardName)
+		//log.Printf("Looking Set -> %s", setName)
 		card := &Card{
 			Name:        cardName,
 			Url:         wURL,
 			Description: "",
 		}
 
-		s.NotifyAll(internal.Message{
-			Topic: "card",
-			Data:  card,
-		})
-
 		for showMore {
-			log.Println("Looking for more sellers")
+			//log.Println("Looking for more sellers")
 			showMoreButton, err := page.Timeout(10 * time.Second).Element("#loadMoreButton")
 			if err != nil {
-				log.Printf("Error Loading more sellers: %s", err.Error())
+				//log.Printf("Error Loading more sellers: %s", err.Error())
 				showMore = false
 			} else {
 				attrs := showMoreButton.MustDescribe().Attributes
-				log.Printf("Attributes %v", attrs)
+				_ = attrs
+				//log.Printf("Attributes %v", attrs)
 				disabled, err := showMoreButton.Attribute("disabled")
 				if err != nil {
 					panic(err)
 				}
 				if disabled == nil {
-					log.Println("Showing more sellers...")
+					//log.Println("Showing more sellers...")
 					showMoreButton.MustWaitStable().MustClick().MustWaitInvisible()
 				} else {
-					log.Printf("Show More Results - disabled attr(%s)", *disabled)
-					log.Println("No more sellers to show!")
+					//log.Printf("Show More Results - disabled attr(%s)", *disabled)
+					//log.Println("No more sellers to show!")
 					showMore = false
 				}
 			}
 		}
-		log.Println("Looking sellers...")
+		//log.Println("Looking sellers...")
 		sellerElements := page.MustElements("div.row.g-0.article-row")
 
 		for _, sEl := range sellerElements {
@@ -233,35 +208,46 @@ func (s *Scraper) Scrap() {
 			s.Sellers = append(s.Sellers, seller)
 			//seller.Round(browser, &wantedList)
 		}
+		
 	}
-	log.Println("Finished after ", time.Since(now))
+}
 
-	// pool := rod.NewPagePool(10)
-	// // Run jobs concurrently
-	// wg := sync.WaitGroup{}
-	// wg.Add(1)
-	// go func() {
+func main(){
+	writer := bufio.NewWriterSize(os.Stdout, 4096)
+	reader := bufio.NewReader(os.Stdin)
+	wantedList := []string{
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Cynthias-Ambition-V2-s12a239?language=7&minCondition=2",
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Swablu-V2-s12a202?language=7&minCondition=2",
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Drapion-V-V2-s12a227?language=7&minCondition=2",
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Raihan-V2-s12a237?language=7&minCondition=2",
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Grant-V2-s12a238?language=7&minCondition=2",
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Cherens-Care-V2-s12a241?language=7&minCondition=2",
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Roxanne-V2-s12a242?language=7&minCondition=2",
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Melony-V2-s12a244?language=7&minCondition=2",
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Volo-V2-s12a245?language=7&minCondition=2",
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Friends-in-Hisui-V2-s12a249?language=7&minCondition=2",
+		"https://www.cardmarket.com/en/Pokemon/Products/Singles/VSTAR-Universe/Bosss-Orders-Cyrus-V2-s12a250?language=7&minCondition=2",
+	}
 
-	// 	defer wg.Done()
-	// 	page := pool.MustGet(GetCreatePage(browser))
-	// 	defer pool.Put(page)
-	// }()
-	// wg.Wait()
-	// // cleanup pool
-	// pool.Cleanup(func(p *rod.Page) { p.MustClose() })
+	scraper := &Scraper{
+		WantedList: wantedList,
+	}
 
-	// sort.Slice(sellers, func(i, j int) bool {
-	// 	return len(sellers[i].CardsAvaialble) > len(sellers[j].CardsAvaialble)
-	// })
-	// log.Println("Finished looking for potential sellers:")
-	// for idx, s := range sellers {
-	// 	log.Printf("--- %s %d ---\n", s.Name, idx+1)
-	// 	log.Printf("URL:\t%s\n", s.Url)
-	// 	log.Printf("Cards for sale (%d/%d):\n", len(s.CardsAvaialble), len(wantedList))
-	// 	var total float32 = 0
-	// 	for _, ca := range s.CardsAvaialble {
-	// 		total += ca.Price
-	// 		log.Printf("\tCard(%s(%s) x %d - %0.2f €)\n", ca.Name, ca.Condition, ca.Quantity, ca.Price)
-	// 	}
-	// }
+	for {
+		readableBytes, _ := reader.Peek(512)
+		if len(readableBytes) > 0 {
+			//fmt.Printf("Peeked %d bytes(%v)\n", len(readableBytes), string(readableBytes))
+			command, err := reader.ReadString('\n')
+			if err != nil {
+				command = err.Error()
+			} else {
+				switch command {
+				case "SCRAP":
+					scraper.Scrap(writer)
+				}	
+			}
+			writer.WriteString(fmt.Sprintf("[Scraper] Recieved command from Parent: %s", command))
+			writer.Flush()
+		}
+	}
 }
