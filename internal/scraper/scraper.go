@@ -3,7 +3,10 @@ package scraper
 import (
 	"fmt"
 	"log"
+	"maps"
 	"poke-tcg-scraper/internal"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -18,7 +21,7 @@ type Scraper struct {
 	observers []internal.Observer
 	// This should be in the config/state
 	WantedList []string
-	Sellers    []*Seller
+	Sellers    map[string]*Seller
 }
 
 func (s *Scraper) Register(o internal.Observer) {
@@ -51,6 +54,8 @@ const CARDMARKET_URL = "https://www.cardmarket.com"
 type Card struct {
 	Name        string
 	Url         string
+	ImageName   string
+	ImageUrl    *string
 	Condition   string
 	Language    string
 	Description string
@@ -64,7 +69,8 @@ type Seller struct {
 	Region         string
 	Category       string
 	Url            string
-	CardsAvaialble []Card
+	CardsAvailable []Card
+	TotalPrice	   float32
 }
 
 // Create a page if needed
@@ -118,7 +124,7 @@ func (s *Seller) LoadSellerCardRow(loadSeller bool, sCard *Card, row *rod.Elemen
 	// } else {
 	// 	return
 	// }
-
+	
 	// Seller product
 	sellerProductInfo := row.MustElement(".col-product")
 
@@ -155,17 +161,19 @@ func (s *Seller) LoadSellerCardRow(loadSeller bool, sCard *Card, row *rod.Elemen
 	if err != nil {
 		sCard.Price = 0
 	} else {
-		sCard.Price = float32(price)
+		cardPrice := float32(price)
+		sCard.Price = cardPrice
+		s.TotalPrice += cardPrice
 	}
 	log.Printf("Added new Card(%d x %s(%s) - %0.2f €) to Seller %s\n", sCard.Quantity, sCard.Name, sCard.Condition, sCard.Price, s.Name)
 
-	s.CardsAvaialble = append(s.CardsAvaialble, *sCard)
+	s.CardsAvailable = append(s.CardsAvailable, *sCard)
 }
 
 func (s *Scraper) Scrap() {
 	now := time.Now()
 	log.Println("Creating browser...")
-	err := s.InitializeBrowser("brave")
+	err := s.InitializeBrowser("chrome")
 	if err != nil {
 		log.Println(err)
 		panic(err)
@@ -178,23 +186,51 @@ func (s *Scraper) Scrap() {
 		page := s.Browser.MustPage(wURL).MustWaitDOMStable()
 		defer page.MustClose()
 
+		card := &Card{
+			Url: wURL,
+		}
+
 		title := page.MustElement("h1").MustText()
 		subject := strings.SplitAfter(title, ")")
-		cardName := subject[0]
+		card.Name = subject[0]
 		setName := strings.TrimSpace(subject[1])
-		log.Printf("Looking Card -> %s", cardName)
+		log.Printf("Looking Card -> %s", card.Name)
 		log.Printf("Looking Set -> %s", setName)
-		card := &Card{
-			Name:        cardName,
-			Url:         wURL,
-			Description: "",
+
+		//Image
+		imageElement := page.MustElement("#image").MustElement("img")
+		imageUrl, err := imageElement.Attribute("src")
+		if err != nil {
+			panic(err)
 		}
+		card.ImageUrl = imageUrl
+		
+		imageName := ""
+		cardNameSections := strings.Split(card.Name, "(")
+		if len(cardNameSections) > 0 {
+			idSec := cardNameSections[1]
+			baseImageName := strings.Replace(
+				strings.Replace(
+					strings.Replace(idSec, "(", "", 1),
+					")", "", 1,
+				),
+				" ", "_", 1,
+			)
+
+			imageExtension := ".jpg"
+			if imageUrl != nil {
+				imageExtension = (*imageUrl)[strings.LastIndex(*imageUrl, "."):]
+			}
+			imageName = baseImageName + imageExtension
+		}
+		card.ImageName = imageName
 
 		s.NotifyAll(internal.Message{
 			Topic: "card",
 			Data:  card,
 		})
 
+		buttonIdx := 0
 		for showMore {
 			log.Println("Looking for more sellers")
 			showMoreButton, err := page.Timeout(10 * time.Second).Element("#loadMoreButton")
@@ -210,31 +246,69 @@ func (s *Scraper) Scrap() {
 				}
 				if disabled == nil {
 					log.Println("Showing more sellers...")
-					showMoreButton.MustWaitStable().MustClick().MustWaitInvisible()
+					//showMoreButton.MustWaitStable()
+					showMoreButton.MustClick()
+					_,err := showMoreButton.Timeout(3 * time.Second).WaitInteractable()
+					if err != nil {
+						maxResReached, _ := page.Timeout(1 * time.Second).Element("div#MaxResultsReachedNotice")
+						if maxResReached != nil {
+							log.Println("Max ammount of sellers reached...")
+							showMore = false
+							continue
+						}
+						// This error should mean that the button is now invisible
+						log.Println("Couldn't wait button to be stable")
+						continue
+					}
 				} else {
 					log.Printf("Show More Results - disabled attr(%s)", *disabled)
 					log.Println("No more sellers to show!")
 					showMore = false
 				}
 			}
+			buttonIdx++
 		}
 		log.Println("Looking sellers...")
 		sellerElements := page.MustElements("div.row.g-0.article-row")
 
 		for _, sEl := range sellerElements {
-			seller := &Seller{}
+			// Seller name
+			sellerInfo := sEl.MustElement(".col-seller")
+			sellerName := sellerInfo.MustElement("a").MustText()
 
-			seller.LoadSellerCardRow(
+			if _, ok := s.Sellers[sellerName]; !ok {
+				newSeller := &Seller{
+					Name: sellerName,
+				}
+				s.Sellers[sellerName] = newSeller
+			}
+			s.Sellers[sellerName].LoadSellerCardRow(
 				true,
 				card,
 				sEl,
 			)
 
-			s.Sellers = append(s.Sellers, seller)
 			//seller.Round(browser, &wantedList)
 		}
+		sellersToSort := slices.Collect(maps.Values(s.Sellers))
+		sort.Slice(sellersToSort, func(i, j int) bool {
+			if len(sellersToSort[i].CardsAvailable) == len(sellersToSort[j].CardsAvailable) {
+				return sellersToSort[i].TotalPrice > sellersToSort[j].TotalPrice
+			}
+			return len(sellersToSort[i].CardsAvailable) > len(sellersToSort[j].CardsAvailable)
+		})
+		sortedSellerMap := make(map[string]*Seller, len(s.Sellers))
+		for _,sSorted := range sellersToSort {
+			sortedSellerMap[sSorted.Name] = sSorted
+		}
+		s.Sellers = sortedSellerMap
+
+		// Notify Scene with the sorted map
+		s.NotifyAll(internal.Message{
+			Topic: "sellers",
+			Data:  s.Sellers,
+		})
 	}
-	log.Println("Finished after ", time.Since(now))
 
 	// pool := rod.NewPagePool(10)
 	// // Run jobs concurrently
@@ -250,18 +324,21 @@ func (s *Scraper) Scrap() {
 	// // cleanup pool
 	// pool.Cleanup(func(p *rod.Page) { p.MustClose() })
 
-	// sort.Slice(sellers, func(i, j int) bool {
-	// 	return len(sellers[i].CardsAvaialble) > len(sellers[j].CardsAvaialble)
-	// })
-	// log.Println("Finished looking for potential sellers:")
-	// for idx, s := range sellers {
-	// 	log.Printf("--- %s %d ---\n", s.Name, idx+1)
-	// 	log.Printf("URL:\t%s\n", s.Url)
-	// 	log.Printf("Cards for sale (%d/%d):\n", len(s.CardsAvaialble), len(wantedList))
-	// 	var total float32 = 0
-	// 	for _, ca := range s.CardsAvaialble {
-	// 		total += ca.Price
-	// 		log.Printf("\tCard(%s(%s) x %d - %0.2f €)\n", ca.Name, ca.Condition, ca.Quantity, ca.Price)
-	// 	}
-	// }
+
+	log.Println("Finished looking for potential sellers:")
+	limit := 50
+	count := 0
+	for sellerName, sellerInfo := range s.Sellers {
+		if count > limit {
+			break
+		}
+		log.Printf("--- %s %d ---\n", sellerName, count+1)
+		log.Printf("URL:\t%s\n", sellerInfo.Url)
+		log.Printf("Cards for sale (%d/%d) at %.2f€:\n", len(sellerInfo.CardsAvailable), len(s.WantedList), sellerInfo.TotalPrice)
+		for _, ca := range sellerInfo.CardsAvailable {
+			log.Printf("\tCard(%s(%s) x %d - %0.2f €)\n", ca.Name, ca.Condition, ca.Quantity, ca.Price)
+		}
+		count++
+	}
+	log.Println("Finished after ", time.Since(now))
 }
